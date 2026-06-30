@@ -15,6 +15,18 @@ var (
 	mu        sync.RWMutex
 )
 
+func 
+
+func saveFile(key, val string) {
+	file, err := os.OpenFile("data.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	file.WriteString(fmt.Sprintf("SET %s %s", key, val))
+}
+
 func handle(conn net.Conn) {
 	defer conn.Close()
 
@@ -38,13 +50,14 @@ func handle(conn net.Conn) {
 			key := message[1]
 			val := message[2]
 			if key == "" || val == "" {
-				fmt.Print("key or val is missing")
+				fmt.Println("key or val is missing")
 				conn.Write([]byte("key or val is missing"))
 				continue
 			}
 			mu.Lock()
 			store[key] = val
 			mu.Unlock()
+			saveFile(key, val)
 			conn.Write([]byte("Key set successfully\r\n"))
 
 		case "GET":
@@ -54,7 +67,7 @@ func handle(conn net.Conn) {
 			mu.RUnlock()
 			if !ok {
 				conn.Write([]byte("Error: key not found"))
-				return
+				continue
 			}
 			buff := []byte(val + "\r\n")
 			conn.Write(buff)
@@ -84,6 +97,8 @@ func main() {
 			}
 		}(i)
 	}
+
+	
 
 	port := ":8080"
 	if len(os.Args) > 1 {
