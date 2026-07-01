@@ -6,8 +6,11 @@ import (
 	"strings"
 )
 
-var current = 0
-var backends = []string{"localhost:8001", "localhost:8002"}
+var (
+	current  = 0
+	backends = []string{"localhost:8001", "localhost:8002"}
+	pool     = []chan net.Conn{make(chan net.Conn, 10), make(chan net.Conn, 10)}
+)
 
 func handle(conn net.Conn) {
 	defer conn.Close()
@@ -25,23 +28,24 @@ func handle(conn net.Conn) {
 
 		fmt.Printf("Routing %s to %s \n", message, backends[current])
 
-		dbConn, err := net.Dial("tcp", backends[current])
-		if err != nil {
-			fmt.Printf("Error in connecting %s \n", backends[current])
-			return
-		}
+		dbConn := <-pool[current]
 
-		_, err = dbConn.Write([]byte(message))
+		_, err = dbConn.Write([]byte(message + "\r\n"))
 		if err != nil {
 			fmt.Println("Error in sending packet to the db server")
+			pool[current] <- dbConn
+			return
 		}
 
 		readBuff := make([]byte, 1024)
 		n, err = dbConn.Read(readBuff)
 		if err != nil {
 			fmt.Println("Error in reading from the db")
+			pool[current] <- dbConn
 			return
 		}
+
+		pool[current] <- dbConn
 
 		conn.Write(readBuff[:n])
 
@@ -52,6 +56,21 @@ func handle(conn net.Conn) {
 
 	}
 
+}
+
+func createPool(connectionString string, connectionPool chan net.Conn, poolNo int) {
+
+	for i := 0; i < cap(connectionPool); i++ {
+
+		dbConn, err := net.Dial("tcp", connectionString)
+		if err != nil {
+			fmt.Printf("Error in creating %s connection %d pool\n", connectionString, poolNo)
+			return
+		}
+
+		connectionPool <- dbConn
+		fmt.Printf("connection %d successful in pool %d\n", i, poolNo)
+	}
 }
 
 func main() {
@@ -65,6 +84,10 @@ func main() {
 	}
 
 	defer listener.Close()
+
+	for i := range 2 {
+		createPool(backends[i], pool[i], i)
+	}
 
 	fmt.Printf("Listening on port %s...\n", port)
 	for {
