@@ -103,8 +103,8 @@ func handle(conn net.Conn) {
 }
 
 func main() {
-
-	walFile, err := os.OpenFile("data.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	var err error
+	walFile, err = os.OpenFile("data.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		panic(err)
 	}

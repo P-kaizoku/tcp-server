@@ -4,17 +4,18 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 var (
 	current  = 0
-	backends = []string{"localhost:8001", "localhost:8002"}
+	backends = []string{"server1:8080", "server2:8080"}
 	pool     = []chan net.Conn{make(chan net.Conn, 10), make(chan net.Conn, 10)}
+	isAlive  = []bool{true, true}
 )
 
 func handle(conn net.Conn) {
 	defer conn.Close()
-
 	buff := make([]byte, 1024)
 
 	for {
@@ -26,13 +27,27 @@ func handle(conn net.Conn) {
 
 		message := strings.TrimSpace(string(buff[:n]))
 
+		for j := 0; j < len(backends); j++ {
+			if isAlive[current] {
+				break
+			}
+			current++
+			if current >= len(backends) {
+				current = 0
+			}
+		}
+
+		if !isAlive[current] {
+			conn.Write([]byte("Error: All backends are down\r\n"))
+			return
+		}
+
 		fmt.Printf("Routing %s to %s \n", message, backends[current])
 
 		dbConn := <-pool[current]
-
 		_, err = dbConn.Write([]byte(message + "\r\n"))
 		if err != nil {
-			fmt.Println("Error in sending packet to the db server")
+			fmt.Println("Error sending to db")
 			pool[current] <- dbConn
 			return
 		}
@@ -40,22 +55,19 @@ func handle(conn net.Conn) {
 		readBuff := make([]byte, 1024)
 		n, err = dbConn.Read(readBuff)
 		if err != nil {
-			fmt.Println("Error in reading from the db")
+			fmt.Println("Error reading from db")
 			pool[current] <- dbConn
 			return
 		}
 
 		pool[current] <- dbConn
-
 		conn.Write(readBuff[:n])
 
 		current++
 		if current >= len(backends) {
 			current = 0
 		}
-
 	}
-
 }
 
 func createPool(connectionString string, connectionPool chan net.Conn, poolNo int) {
@@ -70,6 +82,39 @@ func createPool(connectionString string, connectionPool chan net.Conn, poolNo in
 
 		connectionPool <- dbConn
 		fmt.Printf("connection %d successful in pool %d\n", i, poolNo)
+	}
+}
+
+func startHealthCheck() {
+	for {
+		for i, connection := range backends {
+			dbConn, err := net.Dial("tcp", connection)
+			if err != nil {
+				if isAlive[i] {
+					fmt.Printf("Backend %s is DOWN!\n", connection)
+				}
+				isAlive[i] = false
+				continue
+			}
+
+			dbConn.Write([]byte("PING\r\n"))
+			buff := make([]byte, 1024)
+			n, err := dbConn.Read(buff)
+			dbConn.Close()
+
+			if err != nil || strings.TrimSpace(string(buff[:n])) != "PONG" {
+				if isAlive[i] {
+					fmt.Printf("Backend %s is DOWN!\n", connection)
+				}
+				isAlive[i] = false
+			} else {
+				if !isAlive[i] {
+					fmt.Printf("Backend %s is BACK ONLINE!\n", connection)
+				}
+				isAlive[i] = true
+			}
+		}
+		time.Sleep(time.Second * 5)
 	}
 }
 
@@ -88,6 +133,7 @@ func main() {
 	for i := range 2 {
 		createPool(backends[i], pool[i], i)
 	}
+	go startHealthCheck()
 
 	fmt.Printf("Listening on port %s...\n", port)
 	for {

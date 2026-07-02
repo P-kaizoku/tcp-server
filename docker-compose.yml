@@ -1,0 +1,29 @@
+services:
+  server1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./server", "8080"]
+    volumes:
+      - server1_data:/app
+
+  server2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./server", "8080"]
+    volumes:
+      - server2_data:/app
+
+  lb:
+    build:
+      context: .
+      dockerfile: lb/Dockerfile
+    ports:
+      - "9000:9000"
+    depends_on:
+      - server1
+      - server2
+volumes:
+  server1_data:
+  server2_data:
